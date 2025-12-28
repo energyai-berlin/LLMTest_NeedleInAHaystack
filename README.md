@@ -55,19 +55,6 @@ needlehaystack.run_test --provider anthropic \
   --context_lengths_num_intervals 10
 ```
 
-## Development
-
-```bash
-# Clone and setup
-git clone <repo>
-python3 -m venv venv
-source venv/bin/activate
-pip install -e .
-
-# Run tests
-python -m pytest tests/
-```
-
 ## Results
 
 Results are saved to `results/` directory. Use the included Jupyter notebook to visualize performance heatmaps.
