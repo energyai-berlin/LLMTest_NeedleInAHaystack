@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from jsonargparse import CLI
 
 from . import LLMNeedleHaystackTester, LLMMultiNeedleHaystackTester
-from .evaluators import Evaluator, LangSmithEvaluator, OpenAIEvaluator
+from .evaluators import Evaluator, LangSmithEvaluator, OpenAIEvaluator, OllamaEvaluator
 from .providers import Anthropic, ModelProvider, OpenAI, HuggingFace
 
 load_dotenv()
@@ -15,18 +15,18 @@ class CommandArgs():
     provider: str = "openai"
     evaluator: str = "openai"
     model_name: str = "gpt-3.5-turbo-0125"
-    evaluator_model_name: Optional[str] = "gpt-3.5-turbo-0125"
+    evaluator_model_name: Optional[str] = "qwen3:0.6b"
     needle: Optional[str] = "\nThe best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.\n"
     haystack_dir: Optional[str] = "PaulGrahamEssays"
     retrieval_question: Optional[str] = "What is the best thing to do in San Francisco?"
     results_version: Optional[int] = 1
-    context_lengths_min: Optional[int] = 1000
-    context_lengths_max: Optional[int] = 16000
-    context_lengths_num_intervals: Optional[int] = 35
+    context_lengths_min: Optional[int] = 9000
+    context_lengths_max: Optional[int] = 25000
+    context_lengths_num_intervals: Optional[int] = 4
     context_lengths: Optional[list[int]] = None
     document_depth_percent_min: Optional[int] = 0
     document_depth_percent_max: Optional[int] = 100
-    document_depth_percent_intervals: Optional[int] = 35
+    document_depth_percent_intervals: Optional[int] = 4
     document_depth_percents: Optional[list[int]] = None
     document_depth_percent_interval_type: Optional[str] = "linear"
     num_concurrent_requests: Optional[int] = 1
@@ -89,6 +89,10 @@ def get_evaluator(args: CommandArgs) -> Evaluator:
                                    true_answer=args.needle)
         case "langsmith":
             return LangSmithEvaluator()
+        case "local":
+            return OllamaEvaluator(model_name=args.evaluator_model_name,
+                                  question_asked=args.retrieval_question,
+                                  true_answer=args.needle)
         case _:
             raise ValueError(f"Invalid evaluator: {args.evaluator}")
 

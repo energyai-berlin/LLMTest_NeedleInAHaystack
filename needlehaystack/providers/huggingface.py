@@ -1,11 +1,12 @@
-import os
-import asyncio
+import re
 from operator import itemgetter
 from typing import Optional
 import torch
+import os
+
 
 import huggingface_hub
-from transformers import pipeline, AutoTokenizer
+from transformers import AutoTokenizer
 from langchain_community.llms import HuggingFacePipeline
 from langchain_community.chat_models.huggingface import ChatHuggingFace
 from langchain.prompts import PromptTemplate
@@ -26,6 +27,22 @@ QUESTION_PROMPT = """
 {question}
 </question>
 """
+
+def extract_after_thinking(text: str) -> str:
+    """
+    Extracts the text content that comes after </think> tags.
+    If no </think> tag is found, returns the original text.
+
+    Args:
+        text (str): The response text that may contain <think>...</think> tags
+
+    Returns:
+        str: The text after the thinking section, stripped of whitespace
+    """
+    match = re.search(r'</think>\s*(.*)', text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 class HuggingFace(ModelProvider):
     """
@@ -54,19 +71,25 @@ class HuggingFace(ModelProvider):
         Raises:
             ValueError: If NIAH_MODEL_API_KEY is not found in the environment.
         """
-        api_key = os.getenv('NIAH_MODEL_API_KEY')
-        if (not api_key):
+
+
+        HF_TOKEN = os.getenv("HF_TOKEN")
+
+        if (not HF_TOKEN):
             raise ValueError("NIAH_MODEL_API_KEY must be in env.")
 
         self.model_name = model_name
         self.model_kwargs = model_kwargs
-        self.api_key = api_key
+        self.api_key = HF_TOKEN
 
         huggingface_hub.login(self.api_key)
-        
+
+        # Use GPU if available, otherwise CPU
+        device = 0 if torch.cuda.is_available() else -1
+
         self.model = HuggingFacePipeline.from_model_id(
             model_id=model_name,
-            device=0,
+            device=device,
             task="text-generation",
             pipeline_kwargs=model_kwargs
         )
@@ -74,13 +97,13 @@ class HuggingFace(ModelProvider):
     
     async def evaluate_model(self, prompt_template: str) -> str:
         """
-        Evaluates a given prompt using the OpenAI model and retrieves the model's response.
+        Evaluates a given prompt using the Ollama model and retrieves the model's response.
 
         Args:
             prompt (str): The prompt to send to the model.
 
         Returns:
-            str: The content of the model's response to the prompt.
+            str: The content of the model's response to the prompt, with thinking tags removed.
         """
         prompt = PromptTemplate.from_template(
             prompt_template
@@ -89,7 +112,17 @@ class HuggingFace(ModelProvider):
         chain = LLMChain(llm=self.model, prompt=prompt)
 
         response = await chain.ainvoke(input={})
-        return response
+
+        # Extract the text from the response dictionary
+        if isinstance(response, dict):
+            response_text = response.get('text', '')
+        else:
+            response_text = str(response)
+
+        # Remove thinking tags and return only the answer
+        cleaned_response = extract_after_thinking(response_text)
+
+        return cleaned_response
     
     def generate_prompt(self, context: str, retrieval_question: str) -> str | list[dict[str, str]]:
         """
