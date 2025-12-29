@@ -24,4 +24,6 @@ dependencies = [
     "ollama>=0.6.1",
     "pandas>=2.3.3",
     "seaborn>=0.13.2",
+    "protobuf>=6.33.2",
+    "hf>=1.1.0",
 ]
