@@ -3,10 +3,11 @@ from operator import itemgetter
 from typing import Optional
 import torch
 import os
+from pathlib import Path
 
 
 import huggingface_hub
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain_community.llms import HuggingFacePipeline
 from langchain_community.chat_models.huggingface import ChatHuggingFace
 from langchain.prompts import PromptTemplate
@@ -65,35 +66,74 @@ class HuggingFace(ModelProvider):
         Initializes the HuggingFace model provider with a specific model.
 
         Args:
-            model_name (str): The path of the HuggingFace model to use. Defaults to 'mistralai/Mistral-7B-Instruct-v0.2'.
+            model_name (str): The path of the HuggingFace model to use. Can be either:
+                - A HuggingFace Hub model ID (e.g., 'mistralai/Mistral-7B-Instruct-v0.2')
+                - A local directory path containing the model files
+                Defaults to 'mistralai/Mistral-7B-Instruct-v0.2'.
             model_kwargs (dict): Model configuration. Defaults to {max_tokens: 300, temperature: 0}.
-        
+
         Raises:
-            ValueError: If NIAH_MODEL_API_KEY is not found in the environment.
+            ValueError: If HF_TOKEN is not found in the environment and loading from Hub.
         """
-
-
-        HF_TOKEN = os.getenv("HF_TOKEN")
-
-        if (not HF_TOKEN):
-            raise ValueError("NIAH_MODEL_API_KEY must be in env.")
 
         self.model_name = model_name
         self.model_kwargs = model_kwargs
-        self.api_key = HF_TOKEN
 
-        huggingface_hub.login(self.api_key)
+        # Check if model_name is a local path
+        is_local_path = Path(model_name).exists() and Path(model_name).is_dir()
+
+        # Only require HF_TOKEN for remote models
+        if not is_local_path:
+            HF_TOKEN = os.getenv("HF_TOKEN")
+            if not HF_TOKEN:
+                raise ValueError("HF_TOKEN must be in env for loading models from HuggingFace Hub.")
+            self.api_key = HF_TOKEN
+            huggingface_hub.login(self.api_key)
 
         # Use GPU if available, otherwise CPU
         device = 0 if torch.cuda.is_available() else -1
 
-        self.model = HuggingFacePipeline.from_model_id(
-            model_id=model_name,
-            device=device,
-            task="text-generation",
-            pipeline_kwargs=model_kwargs
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        # Load model based on whether it's local or remote
+        if is_local_path:
+            print(f"Loading model from local directory: {model_name}")
+            # Load tokenizer from local directory
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                local_files_only=True
+            )
+
+            # Load model from local directory
+            local_model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                local_files_only=True,
+                torch_dtype=torch.float16 if device == 0 else torch.float32,
+                device_map="auto" if device == 0 else None
+            )
+
+            # Create pipeline with local model
+            # Don't pass device when using device_map="auto" (accelerate)
+            pipeline_kwargs = {
+                "model": local_model,
+                "tokenizer": self.tokenizer,
+                **model_kwargs
+            }
+            # Only add device parameter when not using device_map
+            if device == -1:  # CPU mode, no device_map used
+                pipeline_kwargs["device"] = device
+
+            pipe = pipeline("text-generation", **pipeline_kwargs)
+
+            self.model = HuggingFacePipeline(pipeline=pipe)
+        else:
+            print(f"Loading model from HuggingFace Hub: {model_name}")
+            # Load from HuggingFace Hub (original behavior)
+            self.model = HuggingFacePipeline.from_model_id(
+                model_id=model_name,
+                device=device,
+                task="text-generation",
+                pipeline_kwargs=model_kwargs
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
     
     async def evaluate_model(self, prompt_template: str) -> str:
         """
@@ -205,27 +245,21 @@ class HuggingFace(ModelProvider):
         """
 
         template = """You are a helpful AI bot that answers questions for a user. Keep your response short and direct" \n
-        \n ------- \n 
-        {context} 
+        \n ------- \n
+        {context}
         \n ------- \n
         Here is the user question: \n --- --- --- \n {question} \n Don't give information outside the document or repeat your findings. Just provide the most relevant sentence in the context without any additional explanation."""
-        
+
         prompt = PromptTemplate(
             template=template,
             input_variables=["context", "question"],
         )
         # Create a LangChain runnable
-        model = HuggingFacePipeline(
-            model_id=self.model_name,
-            device="auto",
-            task="text-generation",
-            model_kwargs=self.model_kwargs
-        )
-
-        chat_model = ChatHuggingFace(llm=model)
+        # Use the already loaded model instead of creating a new one
+        chat_model = ChatHuggingFace(llm=self.model)
         chain = ( {"context": lambda x: context,
-                  "question": itemgetter("question")} 
-                | prompt 
-                | chat_model 
+                  "question": itemgetter("question")}
+                | prompt
+                | chat_model
                 )
         return chain
