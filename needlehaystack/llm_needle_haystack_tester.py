@@ -8,6 +8,7 @@ import numpy as np
 
 from .evaluators import Evaluator
 from .providers import ModelProvider
+from .visualize import generate_visualization
 
 from asyncio import Semaphore
 from datetime import datetime, timezone
@@ -39,6 +40,7 @@ class LLMNeedleHaystackTester:
                  final_context_length_buffer = 200,
                  seconds_to_sleep_between_completions = None,
                  print_ongoing_status = True,
+                 results_subdir = None,
                  **kwargs):
         """
         :model_to_test: The model to test. Default is None.
@@ -81,6 +83,13 @@ class LLMNeedleHaystackTester:
         self.seconds_to_sleep_between_completions = seconds_to_sleep_between_completions
         self.print_ongoing_status = print_ongoing_status
         self.testing_results = []
+
+        # Set up results subdirectory for this run
+        if results_subdir:
+            self.results_subdir = results_subdir
+        else:
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            self.results_subdir = f"run_{timestamp}"
 
         if context_lengths is None:
             if context_lengths_min is None or context_lengths_max is None or context_lengths_num_intervals is None:
@@ -190,19 +199,21 @@ class LLMNeedleHaystackTester:
             results['file_name'] = context_file_location
 
             # Save the context to file for retesting
-            if not os.path.exists('contexts'):
-                os.makedirs('contexts')
+            contexts_dir = f'contexts/{self.results_subdir}'
+            if not os.path.exists(contexts_dir):
+                os.makedirs(contexts_dir)
 
-            with open(f'contexts/{context_file_location}_context.txt', 'w') as f:
+            with open(f'{contexts_dir}/{context_file_location}_context.txt', 'w') as f:
                 f.write(context)
-            
+
         if self.save_results:
-            # Save the context to file for retesting
-            if not os.path.exists('results'):
-                os.makedirs('results')
+            # Save the results to subdirectory for this run
+            results_dir = f'results/{self.results_subdir}'
+            if not os.path.exists(results_dir):
+                os.makedirs(results_dir)
 
             # Save the result to file for retesting
-            with open(f'results/{context_file_location}_results.json', 'w') as f:
+            with open(f'{results_dir}/{context_file_location}_results.json', 'w') as f:
                 json.dump(results, f)
 
         if self.seconds_to_sleep_between_completions:
@@ -213,10 +224,10 @@ class LLMNeedleHaystackTester:
         Checks to see if a result has already been evaluated or not
         """
 
-        results_dir = 'results/'
+        results_dir = f'results/{self.results_subdir}'
         if not os.path.exists(results_dir):
             return False
-        
+
         for filename in os.listdir(results_dir):
             if filename.endswith('.json'):
                 with open(os.path.join(results_dir, filename), 'r') as f:
@@ -319,7 +330,34 @@ class LLMNeedleHaystackTester:
         print (f"- Needle: {self.needle.strip()}")
         print ("\n\n")
 
+    def _generate_visualization(self):
+        """
+        Generate visualization from test results.
+        """
+        try:
+            results_dir = f'results/{self.results_subdir}'
+            output_path = f'{results_dir}/visualization.png'
+
+            if self.print_ongoing_status:
+                print("\nGenerating visualization...")
+
+            generate_visualization(
+                results_dir=results_dir,
+                model_name=self.model_name,
+                output_path=output_path,
+                show_plot=False
+            )
+
+            if self.print_ongoing_status:
+                print(f"Visualization saved to {output_path}")
+        except Exception as e:
+            print(f"Warning: Failed to generate visualization: {e}")
+
     def start_test(self):
         if self.print_ongoing_status:
             self.print_start_test_summary()
         asyncio.run(self.run_test())
+
+        # Generate visualization after test completes
+        if self.save_results:
+            self._generate_visualization()
