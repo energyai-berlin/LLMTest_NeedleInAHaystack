@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
+import numpy as np
 
 
 def load_results(results_dir: str) -> pd.DataFrame:
@@ -89,6 +90,7 @@ def create_heatmap(
     title: Optional[str] = None,
     figsize: tuple = (17.5, 8),
     show_plot: bool = False,
+    show_average_line: bool = True,
 ) -> None:
     """
     Create and save a heatmap visualization of the test results.
@@ -100,32 +102,95 @@ def create_heatmap(
         title: Custom title for the plot (if None, uses default)
         figsize: Figure size as (width, height) tuple
         show_plot: Whether to display the plot interactively
+        show_average_line: Whether to show the average depth score line overlay
     """
-    # Create custom colormap
-    cmap = LinearSegmentedColormap.from_list(
-        "custom_cmap", ["#F0496E", "#EBB839", "#0CD79F"]
+
+    # Create custom colormap: Red -> Orange -> Yellow -> Light Green -> Green
+    custom_colors = [
+        "#e74c3c",  # Light Red (0)
+        "#e67e22",  # Orange (25)
+        "#f1c40f",  # Yellow (50)
+        "#9acd32",  # Yellow-Green (75)
+        "#2ecc71",  # Light Green (100)
+    ]
+    custom_cmap = LinearSegmentedColormap.from_list(
+        "custom_gradient", custom_colors, N=256
     )
 
     # Create the heatmap
-    plt.figure(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize)
     sns.heatmap(
         pivot_table,
         fmt="g",
-        cmap=cmap,
+        cmap=custom_cmap,
         cbar_kws={"label": "Score"},
         vmin=0,
-        vmax=10,
-        annot=True,
-        fmt=".2f",
+        vmax=100,
+        ax=ax,
     )
+
+    # Add average depth score line if enabled
+    if show_average_line:
+        # Calculate average score for each context length (column)
+        avg_scores = pivot_table.mean(axis=0).values
+
+        # Get the number of columns (context lengths)
+        num_cols = len(pivot_table.columns)
+        num_rows = len(pivot_table.index)
+
+        # Create x positions (center of each column)
+        x_positions = np.arange(num_cols) + 0.5
+
+        # Map average scores to y positions on the heatmap
+        # Score of 100 should be at top (y=0), score of 0 at bottom (y=num_rows)
+        y_positions = num_rows * (1 - avg_scores / 100)
+
+        # Plot the line with markers
+        (line,) = ax.plot(
+            x_positions,
+            y_positions,
+            color="white",
+            linewidth=2.5,
+            marker="o",
+            markersize=8,
+            markerfacecolor="white",
+            markeredgecolor="white",
+            zorder=10,
+            label="Average Depth Score",
+        )
+
+        # Add score labels next to each point
+        for i, (x, y, score) in enumerate(zip(x_positions, y_positions, avg_scores)):
+            ax.annotate(
+                f"{score:.2f}",
+                (x, y),
+                textcoords="offset points",
+                xytext=(0, -15),  # Position below the point
+                ha="center",
+                va="top",
+                fontsize=9,
+                fontweight="bold",
+                color="white",
+                zorder=11,
+            )
+
+        # Add legend
+        ax.legend(
+            loc="lower left",
+            framealpha=0.9,
+            facecolor="white",
+            edgecolor="gray",
+        )
 
     # Set title
     if title is None:
-        title = f"Needle In A Haystack Test Results - {model_name}\nFact Retrieval Across Context Lengths"
+        # Calculate overall score
+        overall_score = pivot_table.values.mean()
+        title = f"{model_name}\nOverall Score:{overall_score:.2f}"
 
     plt.title(title)
     plt.xlabel("Token Limit")
-    plt.ylabel("Depth Percent")
+    plt.ylabel("Depth Percent(%)")
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
@@ -152,6 +217,7 @@ def generate_visualization(
     output_path: Optional[str] = None,
     title: Optional[str] = None,
     show_plot: bool = False,
+    show_average_line: bool = True,
 ) -> None:
     """
     Generate a complete visualization from test results.
@@ -165,6 +231,7 @@ def generate_visualization(
         output_path: Path to save the visualization
         title: Custom title for the plot
         show_plot: Whether to display the plot interactively
+        show_average_line: Whether to show the average depth score line overlay
     """
     # Load results
     df = load_results(results_dir)
@@ -179,4 +246,5 @@ def generate_visualization(
         output_path=output_path,
         title=title,
         show_plot=show_plot,
+        show_average_line=show_average_line,
     )
