@@ -8,12 +8,14 @@ class OllamaEvaluator(Evaluator):
 
     CRITERIA = {
         "accuracy": """
-        Score 1: The answer is completely unrelated to the reference.
-        Score 3: The answer has minor relevance but does not align with the reference.
-        Score 5: The answer has moderate relevance but contains inaccuracies.
-        Score 7: The answer aligns with the reference but has minor omissions.
-        Score 10: The answer is completely accurate and aligns perfectly with the reference.
-        Only respond with a numerical score
+        Score 0: The answer is completely unrelated to the reference.
+        Score 25: The answer has minor relevance but does not align with the reference.
+        Score 50: The answer has moderate relevance but contains inaccuracies.
+        Score 75: The answer aligns with the reference but has minor omissions.
+        Score 100: The answer is completely accurate and aligns perfectly with the reference.
+
+        IMPORTANT: You MUST respond with ONLY a valid numerical score (0, 25, 50, 75, or 100).
+        Do NOT include any explanations, words, or extra text - return ONLY the number.
         """
     }
 
@@ -32,7 +34,9 @@ class OllamaEvaluator(Evaluator):
         """
 
         if not true_answer or not question_asked:
-            raise ValueError("true_answer and question_asked must be supplied with init.")
+            raise ValueError(
+                "true_answer and question_asked must be supplied with init."
+            )
 
         self.model_name = model_name
         self.model_kwargs = model_kwargs
@@ -47,16 +51,20 @@ class OllamaEvaluator(Evaluator):
 
     def evaluate_response(self, response: str) -> int:
         # Create evaluation prompt
-        prompt = f"""You are evaluating the accuracy of an answer.
+        prompt = f"""
+        You are evaluating the accuracy of an answer.
 
-Question: {self.question_asked}
-Reference Answer: {self.true_answer}
-Given Answer: {response}
+        Question: {self.question_asked}
+        Reference Answer: {self.true_answer}
+        Given Answer: {response}
 
-Scoring Criteria:
-{self.CRITERIA['accuracy']}
+        Scoring Criteria:
+        {self.CRITERIA['accuracy']}
 
-Please evaluate the given answer and respond with ONLY a single numerical score (1, 3, 5, 7, or 10)."""
+        Please evaluate the given answer and respond with ONLY a single numerical score (0, 25, 50, 75, or 100).
+
+        CRITICAL: Your response MUST be a valid number from the scoring criteria above. Do not write any words or explanations.
+        """
 
         # Get response from Ollama
         result = self.evaluator.invoke(prompt)
@@ -70,10 +78,11 @@ Please evaluate the given answer and respond with ONLY a single numerical score 
         except ValueError:
             # Try to extract first number if response contains extra text
             import re
-            numbers = re.findall(r'\d+', score_text)
+
+            numbers = re.findall(r"\d+", score_text)
             if numbers:
                 score = int(numbers[0])
             else:
-                raise ValueError(f"Could not parse score from response: {score_text}")
+                raise ValueError(f"Could not parse score from response: {score}")
 
         return score

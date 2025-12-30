@@ -1,9 +1,11 @@
-import re
 from operator import itemgetter
 from typing import Optional
 import torch
 import os
 from pathlib import Path
+
+
+# Answer is I love TOlba score 0 100
 
 
 import huggingface_hub
@@ -15,7 +17,13 @@ from langchain.chains import LLMChain
 
 from .model import ModelProvider
 
-SYSTEM_PROMPT = """You are a helpful AI bot that answers questions for a user. Keep your response short and direct"""
+SYSTEM_PROMPT = """You are a precise information retrieval assistant. Your task is to find and extract the exact answer from the provided context.
+
+CRITICAL RULES:
+1. ONLY provide the direct answer from the context
+2. If the answer is in the context, state it exactly as written
+3. Do NOT make up information or guess
+4. Do NOT add explanations or extra commentary"""
 
 CONTEXT_PROMPT = """
 <context>
@@ -29,21 +37,6 @@ QUESTION_PROMPT = """
 </question>
 """
 
-def extract_after_thinking(text: str) -> str:
-    """
-    Extracts the text content that comes after </think> tags.
-    If no </think> tag is found, returns the original text.
-
-    Args:
-        text (str): The response text that may contain <think>...</think> tags
-
-    Returns:
-        str: The text after the thinking section, stripped of whitespace
-    """
-    match = re.search(r'</think>\s*(.*)', text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
 
 class HuggingFace(ModelProvider):
     """
@@ -55,13 +48,15 @@ class HuggingFace(ModelProvider):
         model (AsyncOpenAI): An instance of the AsyncOpenAI client for asynchronous API calls.
         tokenizer: A tokenizer instance for encoding and decoding text to and from token representations.
     """
-        
-    DEFAULT_MODEL_KWARGS: dict = dict(max_new_tokens  = 300,
-                                      temperature = 0)
 
-    def __init__(self,
-                 model_name: str = "mistralai/Mistral-7B-Instruct-v0.2",
-                 model_kwargs: dict = DEFAULT_MODEL_KWARGS):
+    DEFAULT_MODEL_KWARGS: dict = dict(max_new_tokens=300, temperature=0)
+
+    def __init__(
+        self,
+        model_name: str = "mistralai/Mistral-7B-Instruct-v0.2",
+        model_kwargs: dict = DEFAULT_MODEL_KWARGS,
+        device: Optional[int] = None,
+    ):
         """
         Initializes the HuggingFace model provider with a specific model.
 
@@ -71,6 +66,10 @@ class HuggingFace(ModelProvider):
                 - A local directory path containing the model files
                 Defaults to 'mistralai/Mistral-7B-Instruct-v0.2'.
             model_kwargs (dict): Model configuration. Defaults to {max_tokens: 300, temperature: 0}.
+            device (Optional[int]): Device to run the model on.
+                - 0 or positive int: GPU device ID
+                - -1: CPU
+                - None (default): Auto-detect (GPU 0 if available, otherwise CPU)
 
         Raises:
             ValueError: If HF_TOKEN is not found in the environment and loading from Hub.
@@ -86,12 +85,15 @@ class HuggingFace(ModelProvider):
         if not is_local_path:
             HF_TOKEN = os.getenv("HF_TOKEN")
             if not HF_TOKEN:
-                raise ValueError("HF_TOKEN must be in env for loading models from HuggingFace Hub.")
+                raise ValueError(
+                    "HF_TOKEN must be in env for loading models from HuggingFace Hub."
+                )
             self.api_key = HF_TOKEN
             huggingface_hub.login(self.api_key)
 
-        # Use GPU if available, otherwise CPU
-        device = 0 if torch.cuda.is_available() else -1
+        # Use specified device, or auto-detect if not provided
+        if device is None:
+            device = 0 if torch.cuda.is_available() else -1
 
         # Load model based on whether it's local or remote
         if is_local_path:
@@ -99,29 +101,24 @@ class HuggingFace(ModelProvider):
             # Load tokenizer from local directory
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
-                local_files_only=True
+                local_files_only=True,
             )
 
             # Load model from local directory
             local_model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 local_files_only=True,
-                torch_dtype=torch.float16 if device == 0 else torch.float32,
-                device_map="auto" if device == 0 else None
+                torch_dtype=torch.float16 if device >= 0 else torch.float32,
             )
 
             # Create pipeline with local model
-            # Don't pass device when using device_map="auto" (accelerate)
-            pipeline_kwargs = {
-                "model": local_model,
-                "tokenizer": self.tokenizer,
-                **model_kwargs
-            }
-            # Only add device parameter when not using device_map
-            if device == -1:  # CPU mode, no device_map used
-                pipeline_kwargs["device"] = device
-
-            pipe = pipeline("text-generation", **pipeline_kwargs)
+            pipe = pipeline(
+                "text-generation",
+                model=local_model,
+                tokenizer=self.tokenizer,
+                device=device,
+                **model_kwargs,
+            )
 
             self.model = HuggingFacePipeline(pipeline=pipe)
         else:
@@ -131,10 +128,10 @@ class HuggingFace(ModelProvider):
                 model_id=model_name,
                 device=device,
                 task="text-generation",
-                pipeline_kwargs=model_kwargs
+                pipeline_kwargs=model_kwargs,
             )
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-    
+
     async def evaluate_model(self, prompt_template: str) -> str:
         """
         Evaluates a given prompt using the Ollama model and retrieves the model's response.
@@ -145,9 +142,7 @@ class HuggingFace(ModelProvider):
         Returns:
             str: The content of the model's response to the prompt, with thinking tags removed.
         """
-        prompt = PromptTemplate.from_template(
-            prompt_template
-        )
+        prompt = PromptTemplate.from_template(prompt_template)
 
         chain = LLMChain(llm=self.model, prompt=prompt)
 
@@ -155,16 +150,15 @@ class HuggingFace(ModelProvider):
 
         # Extract the text from the response dictionary
         if isinstance(response, dict):
-            response_text = response.get('text', '')
+            response_text = response.get("text", "")
         else:
             response_text = str(response)
 
-        # Remove thinking tags and return only the answer
-        cleaned_response = extract_after_thinking(response_text)
+        return response_text
 
-        return cleaned_response
-    
-    def generate_prompt(self, context: str, retrieval_question: str) -> str | list[dict[str, str]]:
+    def generate_prompt(
+        self, context: str, retrieval_question: str
+    ) -> str | list[dict[str, str]]:
         """
         Generates a structured prompt for querying the model, based on a given context and retrieval question.
 
@@ -175,24 +169,37 @@ class HuggingFace(ModelProvider):
         Returns:
             list[dict[str, str]]: A list of dictionaries representing the structured prompt, including roles and content for system and user messages.
         """
-        prompt_format = [{
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
+        prompt_format = [
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": CONTEXT_PROMPT.format(context=context) + "\n\n" + QUESTION_PROMPT.format(question=retrieval_question) + "\n\nDon't give information outside the document or repeat your findings. Just provide the most relevant sentence in the context."
-            }]
-        
+                "content": CONTEXT_PROMPT.format(context=context)
+                + "\n\n"
+                + QUESTION_PROMPT.format(question=retrieval_question)
+                + "\n\nProvide ONLY the exact answer from the context.",
+            },
+        ]
+
         if not self.tokenizer.chat_template:
             self.tokenizer.chat_template = "{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}"
-        
-        if "system" not in self.tokenizer.chat_template or "raise_exception('System role not supported')" in self.tokenizer.chat_template:
-            prompt_format.pop(0)
-            prompt_format[0]["content"] = SYSTEM_PROMPT + "\n" + prompt_format[0]["content"]
 
-        return self.tokenizer.apply_chat_template(prompt_format, tokenize=False, add_generation_prompt=True)
-    
+        if (
+            "system" not in self.tokenizer.chat_template
+            or "raise_exception('System role not supported')"
+            in self.tokenizer.chat_template
+        ):
+            prompt_format.pop(0)
+            prompt_format[0]["content"] = (
+                SYSTEM_PROMPT + "\n" + prompt_format[0]["content"]
+            )
+
+        return self.tokenizer.apply_chat_template(
+            prompt_format,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+
     def encode_text_to_tokens(self, text: str, no_bos: bool = False) -> list[int]:
         """
         Encodes a given text string to a sequence of tokens using the model's tokenizer.
@@ -208,8 +215,10 @@ class HuggingFace(ModelProvider):
             return self.tokenizer.encode(text)[1:]
         else:
             return self.tokenizer.encode(text)
-    
-    def decode_tokens(self, tokens: list[int], context_length: Optional[int] = None) -> str:
+
+    def decode_tokens(
+        self, tokens: list[int], context_length: Optional[int] = None
+    ) -> str:
         """
         Decodes a sequence of tokens back into a text string using the model's tokenizer.
 
@@ -221,21 +230,21 @@ class HuggingFace(ModelProvider):
             str: The decoded text string.
         """
         return self.tokenizer.decode(tokens[:context_length])
-    
+
     def get_langchain_runnable(self, context: str) -> str:
         """
-        Creates a LangChain runnable that constructs a prompt based on a given context and a question, 
-        queries the HuggingFace model, and returns the model's response. This method leverages the LangChain 
-        library to build a sequence of operations: extracting input variables, generating a prompt, 
+        Creates a LangChain runnable that constructs a prompt based on a given context and a question,
+        queries the HuggingFace model, and returns the model's response. This method leverages the LangChain
+        library to build a sequence of operations: extracting input variables, generating a prompt,
         querying the model, and processing the response.
 
         Args:
-            context (str): The context or background information relevant to the user's question. 
+            context (str): The context or background information relevant to the user's question.
             This context is provided to the model to aid in generating relevant and accurate responses.
 
         Returns:
-            str: A LangChain runnable object that can be executed to obtain the model's response to a 
-            dynamically provided question. The runnable encapsulates the entire process from prompt 
+            str: A LangChain runnable object that can be executed to obtain the model's response to a
+            dynamically provided question. The runnable encapsulates the entire process from prompt
             generation to response retrieval.
 
         Example:
@@ -244,11 +253,20 @@ class HuggingFace(ModelProvider):
                 - Execute the runnable with these parameters to get the model's response.
         """
 
-        template = """You are a helpful AI bot that answers questions for a user. Keep your response short and direct" \n
-        \n ------- \n
+        template = """
+        You are a precise information retrieval assistant. Find and extract the exact answer from the context.
+
+        CRITICAL RULES:
+        - ONLY provide the direct answer from the context
+        - Do NOT make up information or guess
+
+        Context:
         {context}
-        \n ------- \n
-        Here is the user question: \n --- --- --- \n {question} \n Don't give information outside the document or repeat your findings. Just provide the most relevant sentence in the context without any additional explanation."""
+
+        Question: {question}
+
+        Answer:
+        """
 
         prompt = PromptTemplate(
             template=template,
@@ -257,9 +275,9 @@ class HuggingFace(ModelProvider):
         # Create a LangChain runnable
         # Use the already loaded model instead of creating a new one
         chat_model = ChatHuggingFace(llm=self.model)
-        chain = ( {"context": lambda x: context,
-                  "question": itemgetter("question")}
-                | prompt
-                | chat_model
-                )
+        chain = (
+            {"context": lambda x: context, "question": itemgetter("question")}
+            | prompt
+            | chat_model
+        )
         return chain

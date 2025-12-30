@@ -38,6 +38,7 @@ class CommandArgs:
     final_context_length_buffer: Optional[int] = 200
     seconds_to_sleep_between_completions: Optional[float] = None
     print_ongoing_status: Optional[bool] = True
+    device: Optional[int] = None
     # LangSmith parameters
     eval_set: Optional[str] = "multi-needle-eval-pizza-3"
     # Multi-needle parameters
@@ -72,7 +73,7 @@ def get_model_to_test(args: CommandArgs) -> ModelProvider:
         case "anthropic":
             return Anthropic(model_name=args.model_name)
         case "huggingface":
-            return HuggingFace(model_name=args.model_name)
+            return HuggingFace(model_name=args.model_name, device=args.device)
         case _:
             raise ValueError(f"Invalid provider: {args.provider}")
 
