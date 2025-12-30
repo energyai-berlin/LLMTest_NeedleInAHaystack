@@ -1,0 +1,113 @@
+{
+    "default_params": {
+        "needle": "\nThe best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.\n",
+        "haystack_dir": "PaulGrahamEssays",
+        "retrieval_question": "What is the best thing to do in San Francisco?",
+        "results_version": 1,
+        "context_lengths_min": 12000,
+        "context_lengths_max": 42000,
+        "context_lengths_num_intervals": 8,
+        "document_depth_percent_min": 0,
+        "document_depth_percent_max": 100,
+        "document_depth_percent_intervals": 8,
+        "document_depth_percent_interval_type": "linear",
+        "num_concurrent_requests": 1,
+        "save_results": true,
+        "save_contexts": true,
+        "print_ongoing_status": true,
+        "multi_needle": false
+    },
+    "models": [
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/Qwen3-0.6B",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/Qwen3-1.7B",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/Qwen3-4B",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/LFM2-1.2B",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/LFM2-350M",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/MiniCPM4-0.5B",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/MobileLLaMA-1.4B-Base",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/OLMo-2-0425-1B",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/Phi-4-mini-instruct",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/SmolLM2-360M",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/SmolLM3-3B",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/granite-4.0-micro",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": false
+        },
+        {
+            "provider": "huggingface",
+            "model_name": "/mnt/data1/models/pythia-1.4b",
+            "evaluator": "local",
+            "evaluator_model_name": "qwen3:0.6b",
+            "enabled": true
+        }
+    ]
+}
