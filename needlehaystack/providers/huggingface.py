@@ -1,5 +1,5 @@
 from operator import itemgetter
-from typing import Optional
+from typing import Optional, Union
 import torch
 import os
 from pathlib import Path
@@ -49,13 +49,13 @@ class HuggingFace(ModelProvider):
         tokenizer: A tokenizer instance for encoding and decoding text to and from token representations.
     """
 
-    DEFAULT_MODEL_KWARGS: dict = dict(max_new_tokens=300, temperature=0)
+    DEFAULT_MODEL_KWARGS: dict = dict(max_new_tokens=300)
 
     def __init__(
         self,
         model_name: str = "mistralai/Mistral-7B-Instruct-v0.2",
         model_kwargs: dict = DEFAULT_MODEL_KWARGS,
-        device: Optional[int] = None,
+        device: Optional[Union[int, str]] = None,
     ):
         """
         Initializes the HuggingFace model provider with a specific model.
@@ -66,9 +66,13 @@ class HuggingFace(ModelProvider):
                 - A local directory path containing the model files
                 Defaults to 'mistralai/Mistral-7B-Instruct-v0.2'.
             model_kwargs (dict): Model configuration. Defaults to {max_tokens: 300, temperature: 0}.
-            device (Optional[int]): Device to run the model on.
-                - 0 or positive int: GPU device ID
+            device (Optional[Union[int, str]]): Device to run the model on.
+                - 0 or positive int: Single GPU device ID
                 - -1: CPU
+                - "auto": Automatic multi-GPU distribution (recommended for large models)
+                - "balanced": Balanced multi-GPU distribution
+                - "balanced_low_0": Balanced distribution with less weight on GPU 0
+                - "sequential": Sequential layer distribution across GPUs
                 - None (default): Auto-detect (GPU 0 if available, otherwise CPU)
 
         Raises:
@@ -91,9 +95,24 @@ class HuggingFace(ModelProvider):
             self.api_key = HF_TOKEN
             huggingface_hub.login(self.api_key)
 
-        # Use specified device, or auto-detect if not provided
-        if device is None:
-            device = 0 if torch.cuda.is_available() else -1
+        # Determine device strategy
+        use_device_map = isinstance(device, str)
+
+        if use_device_map:
+            # Multi-GPU mode with device_map
+            device_map = device
+            pipeline_device = None  # Pipeline will use device_map from model
+            torch_dtype = torch.float16
+            print(f"Using device_map='{device_map}' for multi-GPU distribution")
+        else:
+            # Single device mode
+            device_map = None
+            if device is None:
+                pipeline_device = 0 if torch.cuda.is_available() else -1
+            else:
+                pipeline_device = device
+            torch_dtype = torch.float16 if pipeline_device >= 0 else torch.float32
+            print(f"Using single device: {pipeline_device}")
 
         # Load model based on whether it's local or remote
         if is_local_path:
@@ -108,7 +127,8 @@ class HuggingFace(ModelProvider):
             local_model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 local_files_only=True,
-                torch_dtype=torch.float16 if device >= 0 else torch.float32,
+                torch_dtype=torch_dtype,
+                device_map=device_map,  # Will be None for single GPU, or "auto"/"balanced" etc. for multi-GPU
             )
 
             # Create pipeline with local model
@@ -116,21 +136,42 @@ class HuggingFace(ModelProvider):
                 "text-generation",
                 model=local_model,
                 tokenizer=self.tokenizer,
-                device=device,
+                device=pipeline_device,  # Will be None for multi-GPU mode
                 **model_kwargs,
             )
 
             self.model = HuggingFacePipeline(pipeline=pipe)
         else:
             print(f"Loading model from HuggingFace Hub: {model_name}")
-            # Load from HuggingFace Hub (original behavior)
-            self.model = HuggingFacePipeline.from_model_id(
-                model_id=model_name,
-                device=device,
-                task="text-generation",
-                pipeline_kwargs=model_kwargs,
-            )
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            # Load from HuggingFace Hub
+            if use_device_map:
+                # For multi-GPU with Hub models, we need to load manually
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+
+                hub_model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    torch_dtype=torch_dtype,
+                    device_map=device_map,
+                )
+
+                pipe = pipeline(
+                    "text-generation",
+                    model=hub_model,
+                    tokenizer=self.tokenizer,
+                    device=None,
+                    **model_kwargs,
+                )
+
+                self.model = HuggingFacePipeline(pipeline=pipe)
+            else:
+                # Single device mode (original behavior)
+                self.model = HuggingFacePipeline.from_model_id(
+                    model_id=model_name,
+                    device=pipeline_device,
+                    task="text-generation",
+                    pipeline_kwargs=model_kwargs,
+                )
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
     async def evaluate_model(self, prompt_template: str) -> str:
         """

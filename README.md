@@ -22,6 +22,9 @@ uv run python -m needlehaystack.run --provider huggingface --evaluator local --m
 
 # Run test on CPU
 uv run python -m needlehaystack.run --provider huggingface --evaluator local --model_name "Qwen/Qwen3-0.6B" --device -1
+
+# Run test using all available GPUs (automatic multi-GPU distribution)
+uv run python -m needlehaystack.run --provider huggingface --evaluator local --model_name "Qwen/Qwen3-0.6B" --device auto
 ```
 
 ## How It Works
@@ -40,32 +43,6 @@ uv run python -m needlehaystack.run --provider huggingface --evaluator local --m
   - For local models, provide the absolute path to the model directory
 - Ollama (`--provider ollama`)
 
-## Key Parameters
-
-```bash
---context_lengths "[2000, 4000, 8000]"           # Context sizes to test
---document_depth_percents "[25, 50, 75]"         # Where to place needle (%)
---multi_needle True                               # Test multiple needles
---evaluator openai                                # Evaluation method (openai or local)
---device 0                                        # GPU device (0, 1, etc.) or -1 for CPU (HuggingFace only)
-```
-
-## Example Tests
-
-```bash
-# Single test
-needlehaystack.run_test --provider openai \
-  --model_name "gpt-4" \
-  --context_lengths "[2000]" \
-  --document_depth_percents "[50]"
-
-# Full sweep
-needlehaystack.run_test --provider anthropic \
-  --model_name "claude-3-opus" \
-  --context_lengths_min 1000 \
-  --context_lengths_max 100000 \
-  --context_lengths_num_intervals 10
-```
 
 ## Results
 
@@ -81,7 +58,6 @@ Results are automatically organized and visualized:
 After each test completes, a heatmap visualization is automatically generated and saved to the results subdirectory. The visualization shows:
 - **X-axis**: Context lengths (tokens)
 - **Y-axis**: Document depth percentages
-- **Colors**: Retrieval scores (red = poor, yellow = medium, green = excellent)
 
 ### Manual Visualization
 
@@ -144,7 +120,11 @@ uv run python -m needlehaystack.run_from_config
 - `evaluator`: Evaluator to use - `"openai"` or `"local"` (Ollama)
   - Local evaluator scores: 0 (unrelated), 25 (minor relevance), 50 (moderate), 75 (aligned with minor omissions), 100 (perfect)
 - `evaluator_model_name`: Model name for the evaluator (default: `"qwen3:0.6b"`)
-- `device`: GPU device ID (0, 1, etc.) or -1 for CPU (HuggingFace only, optional)
+- `device`: GPU device configuration for HuggingFace models (optional):
+  - Single GPU: `0`, `1`, `2`, etc. (specific GPU device ID)
+  - CPU mode: `-1`
+  - Multi-GPU modes: `"auto"` (recommended), `"balanced"`, `"balanced_low_0"`, or `"sequential"`
+  - Default: Auto-detect (GPU 0 if available, otherwise CPU)
 
 **Test Parameters (typically in `default_params`):**
 - `context_lengths_min`: Minimum context length to test (default: 9000)
@@ -176,7 +156,9 @@ uv run python -m needlehaystack.run_from_config
     {
       "provider": "huggingface",
       "model_name": "meta-llama/Llama-3.3-70B-Instruct",
-      "enabled": true
+      "device": "auto",
+      "enabled": true,
+      "comment": "Use all available GPUs for large model"
     },
     {
       "provider": "huggingface",
