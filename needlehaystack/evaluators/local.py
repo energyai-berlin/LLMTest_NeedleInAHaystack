@@ -83,6 +83,7 @@ class OllamaEvaluator(Evaluator):
             if numbers:
                 score = int(numbers[0])
             else:
-                raise ValueError(f"Could not parse score from response: {score}")
+                # Return 0 if score cannot be parsed
+                score = 0
 
         return score
